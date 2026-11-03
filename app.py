@@ -1,262 +1,319 @@
+from io import BytesIO
+from pathlib import Path
 
-import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from io import BytesIO
+import streamlit as st
 
-# 1. CONFIGURACIÓN DE PÁGINA
-st.set_page_config(page_title="Corporate Sales Analytics Dashboard", page_icon="📊", layout="wide")
 
-# Estilos CSS personalizados para tarjetas e indicadores modernos
-st.markdown("""
-<style>
-    .metric-card {
-        background-color: #f8f9fa;
-        border-radius: 8px;
-        padding: 15px;
-        border-left: 5px solid #007bff;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        margin-bottom: 10px;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Configuración de página
+st.set_page_config(
+    page_title="Sales Analytics | Dashboard",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# 2. CARGA DE DATOS OPTIMIZADA
-@st.cache_data
-def load_data():
-    file_path = 'SalidaVentas.xlsx'
-    df = pd.read_excel(file_path)
-    df['Order Date'] = pd.to_datetime(df['Order Date'])
-    df['Ship Date'] = pd.to_datetime(df['Ship Date'])
-    # Asegurar que nulos en Discount se traten como 0
-    df['Discount'] = df['Discount'].fillna(0)
-    return df
+# Paleta visual y estilos
+NAVY = "#10264f"
+BLUE = "#2563eb"
+GREEN = "#22a06b"
+RED = "#e25555"
+MUTED = "#68758b"
 
-try:
-    df_raw = load_data()
-    
-    # 3. BARRA LATERAL - FILTROS DINÁMICOS
-    st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1006/1006193.png", width=80)
-    st.sidebar.title("Filtros de Control")
-    
-    # Filtro de Fechas
-    min_date = df_raw['Order Date'].min().to_pydatetime()
-    max_date = df_raw['Order Date'].max().to_pydatetime()
-    fecha_seleccionada = st.sidebar.date_input(
-        "Rango de Fechas",
-        value=[min_date, max_date],
-        min_value=min_date,
-        max_value=max_date
+st.markdown(
+    """
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
+      :root { --ink:#10264f; --blue:#2563eb; --muted:#68758b; }
+      html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
+      .stApp { background: linear-gradient(180deg, #f6f9ff 0%, #f8fafc 36%, #f4f7fb 100%); }
+      [data-testid="stSidebar"] { background: linear-gradient(180deg, #0b1d3a 0%, #102b57 100%); }
+      [data-testid="stSidebar"] * { color: #eef4ff; }
+      [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color:#c8d6ed; }
+      [data-testid="stSidebar"] [data-baseweb="select"] > div { background:#17345f; }
+      [data-testid="stSidebar"] [data-testid="stDateInput"] input { background:#17345f; }
+      .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 1500px; }
+      h1, h2, h3 { color:var(--ink); font-family:'Manrope', sans-serif; letter-spacing:-.03em; }
+      .eyebrow { color:var(--blue); font-size:.76rem; font-weight:700; letter-spacing:.13em; text-transform:uppercase; margin-bottom:.35rem; }
+      .hero-title { color:var(--ink); font-family:'Manrope', sans-serif; font-size:2.55rem; line-height:1.08; font-weight:800; letter-spacing:-.055em; margin:0; }
+      .hero-copy { color:var(--muted); font-size:1.02rem; margin:.6rem 0 0; }
+      .hero-tag { display:inline-block; padding:.45rem .8rem; border-radius:999px; background:#e8f0ff; color:#1e56c5; font-size:.82rem; font-weight:700; }
+      .section-label { color:var(--muted); font-size:.82rem; font-weight:600; }
+      [data-testid="stMetric"] { background:white; border:1px solid #e8edf5; border-radius:16px; padding:17px 18px; box-shadow:0 6px 20px rgba(16,38,79,.045); min-height:128px; }
+      [data-testid="stMetricLabel"] { color:#66748b; font-size:.88rem; font-weight:600; }
+      [data-testid="stMetricValue"] { color:var(--ink); font-family:'Manrope',sans-serif; font-size:1.65rem; font-weight:800; }
+      [data-testid="stMetricDelta"] { font-size:.8rem; }
+      div[data-testid="stPlotlyChart"], div[data-testid="stDataFrame"] { background:white; border:1px solid #e8edf5; border-radius:16px; padding:8px; box-shadow:0 6px 20px rgba(16,38,79,.035); }
+      div[data-testid="stTabs"] button { font-weight:600; }
+      div.stDownloadButton > button { border-radius:10px; background:var(--blue); color:white; border:0; font-weight:700; padding:.65rem 1rem; }
+      div.stDownloadButton > button:hover { background:#174ec2; color:white; }
+      .stAlert { border-radius:12px; }
+      @media (max-width: 760px) { .hero-title {font-size:2rem;} .block-container {padding-top:1rem;} }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+@st.cache_data(show_spinner="Cargando datos de ventas...")
+def load_data(file_path: str) -> pd.DataFrame:
+    data = pd.read_excel(file_path)
+    data["Order Date"] = pd.to_datetime(data["Order Date"], errors="coerce")
+    if "Ship Date" in data.columns:
+        data["Ship Date"] = pd.to_datetime(data["Ship Date"], errors="coerce")
+    for column in ("Sales", "Profit", "Quantity", "Discount"):
+        if column in data.columns:
+            data[column] = pd.to_numeric(data[column], errors="coerce").fillna(0)
+    if "Discount" not in data.columns:
+        data["Discount"] = 0
+    return data.dropna(subset=["Order Date"])
+
+
+def money(value: float) -> str:
+    return f"${value:,.2f}"
+
+
+def style_chart(fig, height: int = 360):
+    fig.update_layout(
+        template="plotly_white",
+        height=height,
+        margin=dict(l=12, r=12, t=25, b=12),
+        font=dict(family="DM Sans, sans-serif", color=NAVY),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        hoverlabel=dict(bgcolor="white", font_size=13),
     )
-    
-    # Asegurar manejo correcto del rango
-    if isinstance(fecha_seleccionada, list) or isinstance(fecha_seleccionada, tuple):
-        if len(fecha_seleccionada) == 2:
-            start_date, end_date = pd.to_datetime(fecha_seleccionada[0]), pd.to_datetime(fecha_seleccionada[1])
-        else:
-            start_date, end_date = pd.to_datetime(fecha_seleccionada[0]), pd.to_datetime(max_date)
-    else:
-        start_date, end_date = pd.to_datetime(fecha_seleccionada), pd.to_datetime(max_date)
-    
-    # Filtrar inicialmente por fecha para actualizar filtros en cascada
-    df_fecha = df_raw[(df_raw['Order Date'] >= start_date) & (df_raw['Order Date'] <= end_date)]
-    
-    # Filtros en Cascada
-    regiones_disponibles = sorted(df_fecha['Region'].dropna().unique())
-    regiones_selected = st.sidebar.multiselect("Región", options=regiones_disponibles, default=regiones_disponibles)
-    
-    df_reg = df_fecha[df_fecha['Region'].isin(regiones_selected)]
-    
-    estados_disponibles = sorted(df_reg['State'].dropna().unique())
-    estados_selected = st.sidebar.multiselect("Estado", options=estados_disponibles, default=estados_disponibles)
-    
-    df_est = df_reg[df_reg['State'].isin(estados_selected)]
-    
-    categorias_disponibles = sorted(df_est['Category'].dropna().unique())
-    categorias_selected = st.sidebar.multiselect("Categoría", options=categorias_disponibles, default=categorias_disponibles)
-    
-    df_cat = df_est[df_est['Category'].isin(categorias_selected)]
-    
-    clientes_disponibles = sorted(df_cat['Customer Name'].dropna().unique())
-    clientes_selected = st.sidebar.multiselect("Cliente", options=clientes_disponibles)
-    
-    # DataFrame de Trabajo Final Filtrado
-    df_filtrado = df_cat.copy()
-    if clientes_selected:
-        df_filtrado = df_filtrado[df_filtrado['Customer Name'].isin(clientes_selected)]
-    
-    # 4. CUERPO PRINCIPAL
-    st.title("📊 Corporate Sales Analytics Portal")
-    st.markdown("Plataforma inteligente de visualización y monitoreo operativo de ventas, rendimiento y rentabilidad transaccional.")
-    
-    # 5. RESUMEN GENERAL (KPIs)
-    if df_filtrado.empty:
-        st.warning("⚠️ No hay registros que coincidan con la selección de filtros actual.")
-    else:
-        ventas_totales = df_filtrado['Sales'].sum()
-        ganancias_totales = df_filtrado['Profit'].clip(lower=0).sum()
-        perdidas_totales = abs(df_filtrado['Profit'].clip(upper=0).sum())
-        rentabilidad_neta = df_filtrado['Profit'].sum()
-        cantidad_pedidos = df_filtrado['Order ID-1'].nunique()
-        productos_vendidos = df_filtrado['Quantity'].sum()
-        rentabilidad_porcentaje = (rentabilidad_neta / ventas_totales * 100) if ventas_totales > 0 else 0
-        
-        kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
-        with kpi1:
-            st.markdown(f'<div class="metric-card"><h5>Ventas Totales</h5><h3>${ventas_totales:,.2f}</h3></div>', unsafe_allow_html=True)
-        with kpi2:
-            st.markdown(f'<div class="metric-card"><h5>Ganancias</h5><h3 style="color:green;">${ganancias_totales:,.2f}</h3></div>', unsafe_allow_html=True)
-        with kpi3:
-            st.markdown(f'<div class="metric-card"><h5>Pérdidas</h5><h3 style="color:red;">-${perdidas_totales:,.2f}</h3></div>', unsafe_allow_html=True)
-        with kpi4:
-            st.markdown(f'<div class="metric-card"><h5>Pedidos Realizados</h5><h3>{cantidad_pedidos:,}</h3></div>', unsafe_allow_html=True)
-        with kpi5:
-            st.markdown(f'<div class="metric-card"><h5>Margen de Retorno</h5><h3>{rentabilidad_porcentaje:.2f}%</h3></div>', unsafe_allow_html=True)
-        
-        # Creación de Pestañas (Tabs) de Análisis
-        tab_resumen, tab_region, tab_vendedores, tab_productos, tab_perdidas, tab_exportar = st.tabs([
-            "📈 Tendencias y Distribuciones", 
-            "🗺️ Análisis Regional", 
-            "👥 Clientes y Fuerza de Venta",
-            "📦 Productos",
-            "⚠️ Diagnóstico de Pérdidas",
-            "📥 Descarga de Reportes"
-        ])
-        
-        # --- PESTAÑA 1: TENDENCIAS Y DISTRIBUCIONES ---
-        with tab_resumen:
-            col_t1, col_t2 = st.columns(2)
-            with col_t1:
-                st.subheader("Evolución Histórica de Ventas y Ganancias")
-                df_temporal = df_filtrado.groupby(df_filtrado['Order Date'].dt.to_period('M')).agg(
-                    Ventas=('Sales', 'sum'),
-                    Profit=('Profit', 'sum')
-                ).reset_index()
-                df_temporal['Order Date'] = df_temporal['Order Date'].dt.to_timestamp()
-                
-                fig_line = go.Figure()
-                fig_line.add_trace(go.Scatter(x=df_temporal['Order Date'], y=df_temporal['Ventas'], name='Ventas', line=dict(color='blue')))
-                fig_line.add_trace(go.Scatter(x=df_temporal['Order Date'], y=df_temporal['Profit'], name='Margen (Profit)', line=dict(color='green')))
-                st.plotly_chart(fig_line, use_container_width=True)
-                
-            with col_t2:
-                st.subheader("Distribución del Valor de Transacciones")
-                fig_hist = px.histogram(
-                    df_filtrado, 
-                    x='Sales', 
-                    nbins=50,
-                    log_y=True,
-                    title="Distribución de Ventas (Escala Logarítmica en Frecuencia)",
-                    color_discrete_sequence=['royalblue']
-                )
-                st.plotly_chart(fig_hist, use_container_width=True)
-        
-        # --- PESTAÑA 2: ANÁLISIS REGIONAL ---
-        with tab_region:
-            col_r1, col_r2 = st.columns(2)
-            with col_r1:
-                st.subheader("Distribución de Ventas por Región")
-                region_sales = df_filtrado.groupby('Region')['Sales'].sum().reset_index()
-                fig_pie = px.pie(region_sales, values='Sales', names='Region', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                st.plotly_chart(fig_pie, use_container_width=True)
-                
-            with col_r2:
-                st.subheader("Margen de Ganancias por Estado")
-                region_profit = df_filtrado.groupby('State')['Profit'].sum().reset_index().sort_values(by='Profit', ascending=False)
-                fig_bar_reg = px.bar(region_profit, x='State', y='Profit', color='Profit', color_continuous_scale='Viridis')
-                st.plotly_chart(fig_bar_reg, use_container_width=True)
-        
-        # --- PESTAÑA 3: CLIENTES Y VENDEDORES ---
-        with tab_vendedores:
-            st.subheader("Análisis del Personal Comercial (Vendedores)")
-            st.info("ℹ️ **Limitación de Datos:** El archivo original `SalidaVentas.xlsx` no cuenta con una columna que detalle el nombre de los vendedores asociados a cada transacción. Se sugiere evitar la confusión de los registros de clientes con asesores comerciales.")
-            
-            st.markdown("---")
-            st.subheader("Top Clientes con Mayor Aportación de Valor")
-            top_clientes = df_filtrado.groupby('Customer Name').agg(
-                Compras_Totales=('Sales', 'sum'),
-                Rentabilidad_Aportada=('Profit', 'sum'),
-                Transacciones=('Quantity', 'count')
-            ).sort_values(by='Compras_Totales', ascending=False).head(15).reset_index()
-            
-            top_clientes['Participacion_%'] = (top_clientes['Compras_Totales'] / ventas_totales) * 100
-            st.dataframe(top_clientes.style.format({
-                'Compras_Totales': '${:,.2f}',
-                'Rentabilidad_Aportada': '${:,.2f}',
-                'Participacion_%': '{:.2f}%'
-            }))
-        
-        # --- PESTAÑA 4: PRODUCTOS ---
-        with tab_productos:
-            col_p1, col_p2 = st.columns(2)
-            with col_p1:
-                st.subheader("Top 10 Productos con Mayores Ganancias")
-                top_prod_ganancia = df_filtrado.groupby('Product Name')['Profit'].sum().reset_index().sort_values(by='Profit', ascending=False).head(10)
-                fig_top_p = px.bar(top_prod_ganancia, x='Profit', y='Product Name', orientation='h', color='Profit', color_continuous_scale='Greens')
-                st.plotly_chart(fig_top_p, use_container_width=True)
-                
-            with col_p2:
-                st.subheader("Top 10 Productos Generadores de Pérdidas")
-                top_prod_perdida = df_filtrado.groupby('Product Name')['Profit'].sum().reset_index().sort_values(by='Profit', ascending=True).head(10)
-                fig_low_p = px.bar(top_prod_perdida, x='Profit', y='Product Name', orientation='h', color='Profit', color_continuous_scale='Reds')
-                st.plotly_chart(fig_low_p, use_container_width=True)
-        
-        # --- PESTAÑA 5: DIAGNÓSTICO DE PÉRDIDAS ---
-        with tab_perdidas:
-            st.subheader("Correlación entre Descuentos Aplicados y Rentabilidad")
-            st.write("A continuación analizamos de qué manera influyen las políticas agresivas de descuento comercial en la pérdida directa de utilidad.")
-            
-            col_per1, col_per2 = st.columns([1, 2])
-            with col_per1:
-                st.metric("Tasa Media de Descuento General", f"{df_filtrado['Discount'].mean()*100:.2f}%")
-                sub_descuento = df_filtrado.groupby('Sub-Category').agg(
-                    Margen_Total=('Profit', 'sum'),
-                    Descuento_Medio=('Discount', 'mean')
-                ).sort_values(by='Margen_Total').reset_index()
-                st.dataframe(sub_descuento.style.format({
-                    'Margen_Total': '${:,.2f}',
-                    'Descuento_Medio': '{:.2%}'
-                }))
-                
-            with col_per2:
-                fig_scat = px.scatter(
-                    df_filtrado,
-                    x='Discount',
-                    y='Profit',
-                    color='Category',
-                    trendline='ols',
-                    title="Relación de Pérdida Transaccional vs Porcentaje de Descuento"
-                )
-                st.plotly_chart(fig_scat, use_container_width=True)
-        
-        # --- PESTAÑA 6: EXPORTACIÓN Y CONCLUSIONES ---
-        with tab_exportar:
-            st.subheader("Generación de Reportes Ejecutivos")
-            st.markdown("Descarga los registros filtrados actuales en formato Excel para un análisis complementario off-line.")
-            
-            def to_excel(df_in):
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df_in.to_excel(writer, index=False, sheet_name='ReporteVentas')
-                processed_data = output.getvalue()
-                return processed_data
-                
-            excel_data = to_excel(df_filtrado)
-            st.download_button(
-                label="📥 Descargar Data Filtrada en Excel",
-                data=excel_data,
-                file_name='Reporte_Ventas_Filtrado.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            )
-            
-            st.markdown("---")
-            st.subheader("🎯 Conclusiones y Recomendaciones Clave")
-            st.markdown("""
-            * **Control de Políticas de Descuento:** Existe una correlación negativa directa entre el volumen de descuento aplicado y el margen neto. Se sugiere fijar límites de descuento estrictos para la región West (específicamente en estados de alto volumen con pérdidas como Colorado, Oregon y Arizona).
-            * **Estrategia en Tecnología y Muebles:** Segmentos como máquinas y mesas demandan revisiones de su estructura de precios antes de autorizar descuentos comerciales.
-            * **Optimización Comercial:** Al no contarse con un registro de agentes/vendedores dentro del set de datos original, se recomienda incorporar esta variable en sistemas de captura futuros para poder ligar e incentivar la efectividad de la fuerza comercial.
-            """)
+    fig.update_xaxes(showgrid=False, zeroline=False)
+    fig.update_yaxes(gridcolor="#edf1f7", zeroline=False)
+    return fig
 
-except Exception as e:
-    st.error(f"❌ Ocurrió un problema de ejecución en el tablero: {e}")
+
+file_path = Path(__file__).with_name("SalidaVentas.xlsx")
+try:
+    if not file_path.exists():
+        st.error(f"No se encontró el archivo de datos: `{file_path.name}`. Colócalo junto a `app.py`.")
+        st.stop()
+    df_raw = load_data(str(file_path))
+except Exception as error:
+    st.error(f"No se pudieron cargar los datos. Revisa `SalidaVentas.xlsx` y sus columnas. Detalle: {error}")
+    st.stop()
+
+if df_raw.empty:
+    st.warning("El archivo no contiene registros con una fecha de pedido válida.")
+    st.stop()
+
+# Barra lateral: filtros
+with st.sidebar:
+    st.markdown("### 📊 Sales Analytics")
+    st.caption("Panel de control · Ventas y rentabilidad")
+    st.divider()
+    st.markdown("#### Ajusta tu análisis")
+
+    min_date = df_raw["Order Date"].min().date()
+    max_date = df_raw["Order Date"].max().date()
+    selected_dates = st.date_input(
+        "Período de pedidos",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date,
+        help="Selecciona el período que quieres analizar.",
+    )
+    if isinstance(selected_dates, (tuple, list)):
+        start_date = selected_dates[0]
+        end_date = selected_dates[-1] if len(selected_dates) == 2 else max_date
+    else:
+        start_date = end_date = selected_dates
+
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1)
+    df_date = df_raw[(df_raw["Order Date"] >= start_ts) & (df_raw["Order Date"] < end_ts)]
+
+    region_options = sorted(df_date["Region"].dropna().unique()) if "Region" in df_date else []
+    selected_regions = st.multiselect("Región", region_options, default=region_options)
+    df_region = df_date[df_date["Region"].isin(selected_regions)] if "Region" in df_date else df_date
+
+    state_options = sorted(df_region["State"].dropna().unique()) if "State" in df_region else []
+    selected_states = st.multiselect("Estado", state_options, default=state_options)
+    df_state = df_region[df_region["State"].isin(selected_states)] if "State" in df_region else df_region
+
+    category_options = sorted(df_state["Category"].dropna().unique()) if "Category" in df_state else []
+    selected_categories = st.multiselect("Categoría", category_options, default=category_options)
+    df_category = df_state[df_state["Category"].isin(selected_categories)] if "Category" in df_state else df_state
+
+    customer_options = sorted(df_category["Customer Name"].dropna().unique()) if "Customer Name" in df_category else []
+    selected_customers = st.multiselect("Cliente (opcional)", customer_options)
+    df_filtered = df_category.copy()
+    if selected_customers:
+        df_filtered = df_filtered[df_filtered["Customer Name"].isin(selected_customers)]
+    st.divider()
+    st.caption(f"{len(df_filtered):,} registros incluidos")
+
+# Encabezado
+header, badge = st.columns([5, 1])
+with header:
+    st.markdown('<div class="eyebrow">Panel de inteligencia comercial</div>', unsafe_allow_html=True)
+    st.markdown('<h1 class="hero-title">Ventas, analizadas<br>con claridad.</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="hero-copy">Sigue el rendimiento, descubre tendencias y toma decisiones basadas en tus datos.</p>', unsafe_allow_html=True)
+with badge:
+    st.markdown('<div style="text-align:right;padding-top:1rem"><span class="hero-tag">● En vivo</span></div>', unsafe_allow_html=True)
+st.write("")
+
+if df_filtered.empty:
+    st.warning("No hay registros que coincidan con los filtros seleccionados. Amplía el período o cambia los filtros.")
+    st.stop()
+
+sales_total = df_filtered["Sales"].sum() if "Sales" in df_filtered else 0
+net_profit = df_filtered["Profit"].sum() if "Profit" in df_filtered else 0
+positive_profit = df_filtered["Profit"].clip(lower=0).sum() if "Profit" in df_filtered else 0
+losses = abs(df_filtered["Profit"].clip(upper=0).sum()) if "Profit" in df_filtered else 0
+order_count = df_filtered["Order ID-1"].nunique() if "Order ID-1" in df_filtered else len(df_filtered)
+quantity = df_filtered["Quantity"].sum() if "Quantity" in df_filtered else 0
+margin_pct = (net_profit / sales_total * 100) if sales_total else 0
+
+st.markdown("#### Resumen del período")
+st.markdown('<div class="section-label">Indicadores clave · Actualizados según tus filtros</div>', unsafe_allow_html=True)
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("Ventas totales", money(sales_total), help="Suma de ventas del período seleccionado")
+k2.metric("Ganancia bruta positiva", money(positive_profit), delta="Antes de pérdidas")
+k3.metric("Pérdidas", money(losses), delta="Profit negativo", delta_color="inverse")
+k4.metric("Pedidos", f"{order_count:,}", help=f"Unidades vendidas: {quantity:,.0f}")
+k5.metric("Margen neto", f"{margin_pct:.1f}%", delta=money(net_profit))
+st.write("")
+
+# Áreas de análisis
+(tab_overview, tab_region, tab_customers, tab_products, tab_losses, tab_reports) = st.tabs(
+    ["📈  Tendencias", "🌎  Regiones", "👥  Clientes", "📦  Productos", "⚠️  Descuentos", "📥  Reportes"]
+)
+
+with tab_overview:
+    left, right = st.columns([1.55, 1])
+    with left:
+        st.subheader("Evolución de ventas y ganancias")
+        temporal = df_filtered.set_index("Order Date").resample("MS").agg(
+            Ventas=("Sales", "sum"), Ganancia=("Profit", "sum")
+        ).reset_index()
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=temporal["Order Date"], y=temporal["Ventas"], name="Ventas", mode="lines+markers", line=dict(color=BLUE, width=3), fill="tozeroy", fillcolor="rgba(37,99,235,.08)"))
+        fig.add_trace(go.Scatter(x=temporal["Order Date"], y=temporal["Ganancia"], name="Ganancia neta", mode="lines+markers", line=dict(color=GREEN, width=2.5, dash="dot")))
+        fig.update_layout(hovermode="x unified", yaxis_title="Importe ($)", xaxis_title=None)
+        st.plotly_chart(style_chart(fig, 380), use_container_width=True)
+    with right:
+        st.subheader("¿Cuánto valen las ventas?")
+        fig_hist = px.histogram(df_filtered, x="Sales", nbins=35, color_discrete_sequence=[BLUE], labels={"Sales": "Importe de venta", "count": "Transacciones"})
+        fig_hist.update_traces(marker_line_color="white", marker_line_width=1)
+        fig_hist.update_layout(xaxis_title="Importe ($)", yaxis_title="Número de transacciones")
+        st.plotly_chart(style_chart(fig_hist, 380), use_container_width=True)
+
+    st.subheader("Rendimiento por categoría")
+    if "Category" in df_filtered:
+        category_data = df_filtered.groupby("Category", as_index=False).agg(Ventas=("Sales", "sum"), Ganancia=("Profit", "sum"))
+        cat_col1, cat_col2 = st.columns([1, 1.4])
+        with cat_col1:
+            fig_cat = px.pie(category_data, values="Ventas", names="Category", hole=.68, color_discrete_sequence=px.colors.qualitative.Set2)
+            fig_cat.update_layout(showlegend=True, legend=dict(orientation="h", y=-.12))
+            st.plotly_chart(style_chart(fig_cat, 320), use_container_width=True)
+        with cat_col2:
+            fig_cat_bar = px.bar(category_data.sort_values("Ventas"), x="Ventas", y="Category", orientation="h", color="Ganancia", color_continuous_scale="Blues", labels={"Category": "Categoría", "Ventas": "Ventas ($)"})
+            st.plotly_chart(style_chart(fig_cat_bar, 320), use_container_width=True)
+
+with tab_region:
+    region_col, state_col = st.columns(2)
+    with region_col:
+        st.subheader("Ventas por región")
+        if "Region" in df_filtered:
+            region_sales = df_filtered.groupby("Region", as_index=False)["Sales"].sum().sort_values("Sales", ascending=False)
+            fig_region = px.pie(region_sales, values="Sales", names="Region", hole=.58, color_discrete_sequence=px.colors.qualitative.Bold)
+            fig_region.update_traces(textposition="inside", textinfo="percent+label")
+            st.plotly_chart(style_chart(fig_region, 390), use_container_width=True)
+    with state_col:
+        st.subheader("Ganancia neta por estado")
+        if "State" in df_filtered:
+            state_profit = df_filtered.groupby("State", as_index=False)["Profit"].sum().sort_values("Profit", ascending=True).tail(15)
+            fig_state = px.bar(state_profit, x="Profit", y="State", orientation="h", color="Profit", color_continuous_scale="RdYlGn", labels={"Profit": "Ganancia ($)"})
+            st.plotly_chart(style_chart(fig_state, 440), use_container_width=True)
+    if "Region" in df_filtered:
+        st.subheader("Detalle regional")
+        region_summary = df_filtered.groupby("Region", as_index=False).agg(Ventas=("Sales", "sum"), Ganancia=("Profit", "sum"), Pedidos=("Order ID-1", "nunique") if "Order ID-1" in df_filtered else ("Sales", "count"))
+        st.dataframe(region_summary.style.format({"Ventas": "${:,.2f}", "Ganancia": "${:,.2f}", "Pedidos": "{:,.0f}"}), use_container_width=True, hide_index=True)
+
+with tab_customers:
+    st.subheader("Clientes con mayor aportación")
+    st.caption("Identifica tus cuentas principales por ventas y contribución a la ganancia.")
+    if "Customer Name" in df_filtered:
+        customer_summary = df_filtered.groupby("Customer Name", as_index=False).agg(
+            Ventas=("Sales", "sum"), Ganancia=("Profit", "sum"),
+            Transacciones=("Quantity", "count") if "Quantity" in df_filtered else ("Sales", "count"),
+        ).sort_values("Ventas", ascending=False).head(15)
+        customer_summary["Participación"] = customer_summary["Ventas"] / sales_total if sales_total else 0
+        customer_summary = customer_summary.rename(columns={"Customer Name": "Cliente"})
+        st.dataframe(customer_summary.style.format({"Ventas": "${:,.2f}", "Ganancia": "${:,.2f}", "Participación": "{:.1%}"}), use_container_width=True, hide_index=True)
+    st.info("El archivo de origen no incluye información de vendedores. Para analizar el rendimiento del equipo comercial, agrega esa dimensión a los datos.")
+
+with tab_products:
+    if "Product Name" in df_filtered:
+        product_summary = df_filtered.groupby("Product Name", as_index=False).agg(Ventas=("Sales", "sum"), Ganancia=("Profit", "sum"), Unidades=("Quantity", "sum") if "Quantity" in df_filtered else ("Sales", "count"))
+        col_profit, col_loss = st.columns(2)
+        with col_profit:
+            st.subheader("Productos más rentables")
+            best = product_summary.nlargest(10, "Ganancia").sort_values("Ganancia")
+            fig_best = px.bar(best, x="Ganancia", y="Product Name", orientation="h", color="Ganancia", color_continuous_scale="Greens", labels={"Product Name": "Producto", "Ganancia": "Ganancia ($)"})
+            st.plotly_chart(style_chart(fig_best, 430), use_container_width=True)
+        with col_loss:
+            st.subheader("Productos con mayor pérdida")
+            worst = product_summary.nsmallest(10, "Ganancia").sort_values("Ganancia")
+            fig_worst = px.bar(worst, x="Ganancia", y="Product Name", orientation="h", color="Ganancia", color_continuous_scale="Reds", labels={"Product Name": "Producto", "Ganancia": "Ganancia ($)"})
+            st.plotly_chart(style_chart(fig_worst, 430), use_container_width=True)
+        st.subheader("Resumen de productos")
+        st.dataframe(product_summary.sort_values("Ventas", ascending=False).head(20).style.format({"Ventas": "${:,.2f}", "Ganancia": "${:,.2f}", "Unidades": "{:,.0f}"}), use_container_width=True, hide_index=True)
+
+with tab_losses:
+    st.subheader("Descuentos y rentabilidad")
+    st.caption("Explora cómo se relacionan los descuentos aplicados con el resultado de cada venta.")
+    discount_col, scatter_col = st.columns([.8, 1.7])
+    with discount_col:
+        st.metric("Descuento medio", f"{df_filtered['Discount'].mean():.1%}")
+        if "Sub-Category" in df_filtered:
+            subcategory = df_filtered.groupby("Sub-Category", as_index=False).agg(Ganancia=("Profit", "sum"), Descuento=("Discount", "mean")).sort_values("Ganancia")
+            st.dataframe(subcategory.style.format({"Ganancia": "${:,.2f}", "Descuento": "{:.1%}"}), use_container_width=True, hide_index=True)
+    with scatter_col:
+        if "Category" in df_filtered:
+            fig_scatter = px.scatter(df_filtered, x="Discount", y="Profit", color="Category", opacity=.65, title="Descuento frente a ganancia por transacción", labels={"Discount": "Descuento", "Profit": "Ganancia ($)"}, hover_data=[c for c in ["Product Name", "Order Date"] if c in df_filtered])
+        else:
+            fig_scatter = px.scatter(df_filtered, x="Discount", y="Profit", opacity=.65, title="Descuento frente a ganancia por transacción", labels={"Discount": "Descuento", "Profit": "Ganancia ($)"})
+        fig_scatter.update_xaxes(tickformat=".0%")
+        st.plotly_chart(style_chart(fig_scatter, 430), use_container_width=True)
+
+with tab_reports:
+    st.subheader("Descarga tu reporte")
+    st.markdown("Exporta la selección actual para compartirla o continuar el análisis en Excel.")
+    @st.cache_data
+    def to_excel(data: pd.DataFrame) -> bytes:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            data.to_excel(writer, index=False, sheet_name="Reporte de ventas")
+            worksheet = writer.sheets["Reporte de ventas"]
+            worksheet.freeze_panes(1, 0)
+            worksheet.autofilter(0, 0, len(data), max(len(data.columns) - 1, 0))
+        return output.getvalue()
+
+    report_col, summary_col = st.columns([1, 1.5])
+    with report_col:
+        st.download_button(
+            "⬇️ Descargar Excel filtrado",
+            data=to_excel(df_filtered),
+            file_name="reporte_ventas_filtrado.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+        st.caption(f"{len(df_filtered):,} filas · {len(df_filtered.columns)} columnas")
+    with summary_col:
+        st.markdown("#### Resumen de la selección")
+        st.write(f"- **Período:** {start_date:%d/%m/%Y} – {end_date:%d/%m/%Y}")
+        st.write(f"- **Ventas:** {money(sales_total)}")
+        st.write(f"- **Ganancia neta:** {money(net_profit)} ({margin_pct:.1f}% de margen)")
+        st.write(f"- **Unidades vendidas:** {quantity:,.0f}")
+
+st.markdown("<div style='text-align:center;color:#8a96a9;font-size:.78rem;padding-top:2rem'>Sales Analytics · Dashboard de rendimiento comercial</div>", unsafe_allow_html=True)
