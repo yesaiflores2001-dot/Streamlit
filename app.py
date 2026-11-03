@@ -25,7 +25,7 @@ st.markdown("""
 # 2. CARGA DE DATOS OPTIMIZADA
 @st.cache_data
 def load_data():
-    file_path = '/SalidaVentas.xlsx'
+    file_path = 'SalidaVentas.xlsx'
     df = pd.read_excel(file_path)
     df['Order Date'] = pd.to_datetime(df['Order Date'])
     df['Ship Date'] = pd.to_datetime(df['Ship Date'])
